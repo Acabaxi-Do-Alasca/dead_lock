@@ -15,6 +15,7 @@ STATE_LABELS = {
     "RUNNING": "executando",
     "BLOCKED": "bloqueado",
     "FINISHED": "terminado",
+    "ABORTED": "abortado",
 }
 
 
@@ -167,7 +168,10 @@ class SimulationTab(ttk.Frame):
         ).pack(side="top", anchor="w", pady=2, fill="x")
         if engine.mode == Mode.FREE:
             ttk.Button(
-                button_frame, text="Verificar Deadlock", command=self._on_check_deadlock
+                button_frame, text="Verificar Deadlock (detecção)", command=self._on_check_deadlock
+            ).pack(side="top", anchor="w", pady=2, fill="x")
+            ttk.Button(
+                button_frame, text="Recuperar do Deadlock (abortar vítima)", command=self._on_recover
             ).pack(side="top", anchor="w", pady=2, fill="x")
 
     # -- ações ------------------------------------------------------------------
@@ -239,6 +243,26 @@ class SimulationTab(ttk.Frame):
         self.app.refresh_all()
         if result.deadlocked_processes:
             names = ", ".join(engine.state.processes[i].name for i in result.deadlocked_processes)
-            messagebox.showerror("Deadlock detectado", f"Processos em deadlock: {names}. Veja o log para a análise completa.")
+            messagebox.showerror(
+                "Deadlock detectado",
+                f"Processos em deadlock: {names}. Veja o log para a análise completa.\n\n"
+                "Use \"Recuperar do Deadlock\" para tratar a situação.",
+            )
         else:
             messagebox.showinfo("Sem deadlock", "Nenhum deadlock foi detectado no estado atual.")
+
+    def _on_recover(self):
+        engine = self.app.engine
+        if engine is None:
+            return
+        result = engine.recover_from_deadlock()
+        self.app.refresh_all()
+        if result.victims:
+            names = ", ".join(engine.state.processes[i].name for i in result.victims)
+            messagebox.showinfo(
+                "Deadlock tratado",
+                f"Vítima(s) abortada(s): {names}. Os recursos liberados foram repassados aos "
+                "processos que esperavam e o ciclo foi quebrado. Veja o log para o passo a passo.",
+            )
+        else:
+            messagebox.showinfo("Sem deadlock", "Não havia deadlock para tratar.")

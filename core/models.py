@@ -15,6 +15,7 @@ class ProcessState(Enum):
     RUNNING = auto()     # marcado como em execução (uso decorativo/didático)
     BLOCKED = auto()      # esperando um recurso (requisição negada ou insuficiente)
     FINISHED = auto()     # terminou e liberou todos os recursos
+    ABORTED = auto()      # escolhido como vítima e abortado para quebrar um deadlock
 
 
 @dataclass
@@ -37,6 +38,7 @@ class LogEntry:
 
     step: int
     category: str
-    # SAFETY_CHECK | RELEASE | RESULT | REQUEST | GRANT | DENY | ROLLBACK | INFO
+    # SAFETY_CHECK | DEADLOCK_CHECK | RELEASE | RESULT | REQUEST | GRANT | DENY |
+    # ROLLBACK | RECOVERY | ABORT | INFO
     message: str
     data: dict = field(default_factory=dict)

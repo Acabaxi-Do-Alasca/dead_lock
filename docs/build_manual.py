@@ -4,7 +4,9 @@ Uso: python docs/build_manual.py
 Gera: Manual_Simulador_Banqueiro.docx na raiz do projeto.
 """
 
+import logging
 import os
+import sys
 
 from docx import Document
 from docx.enum.table import WD_TABLE_ALIGNMENT
@@ -14,13 +16,74 @@ from docx.oxml.ns import qn
 from docx.shared import Cm, Mm, Pt, RGBColor
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_DIR = os.path.dirname(BASE_DIR)
 IMG_DIR = os.path.join(BASE_DIR, "imagens")
-OUT_PATH = os.path.join(os.path.dirname(BASE_DIR), "Manual_Simulador_Banqueiro.docx")
+OUT_PATH = os.path.join(PROJECT_DIR, "Manual_Simulador_Banqueiro.docx")
+
+sys.path.insert(0, PROJECT_DIR)
+from scenarios.loader import build_engine_from_scenario  # noqa: E402
+from simulation.terminal_log import ConsoleFormatter, LOGGER_NAME  # noqa: E402
 
 ACCENT = RGBColor(0x1F, 0x4E, 0x5F)
 GRAY = RGBColor(0x55, 0x55, 0x55)
 
+# Cores do terminal de log (mesma ideia das cores ANSI de simulation/terminal_log.py)
+TERMINAL_COLORS = {
+    "REQUEST": "4FC1E9", "GRANT": "8CD17D", "DENY": "F2C14E", "ROLLBACK": "F2726F",
+    "RESULT": "D59BF6", "RECOVERY": "F2726F", "ABORT": "F2726F", "RELEASE": "7FA7E8",
+}
+
 fig_counter = [0]
+
+
+def capture_terminal_log_of_scenario_c():
+    """Roda o Cenário C de verdade (forçar deadlock -> detectar -> tratar) e
+    devolve as linhas exatamente como saem no terminal de log."""
+    lines = []
+
+    class Collector(logging.Handler):
+        def emit(self, record):
+            lines.extend(self.format(record).split("\n"))
+
+    logger = logging.getLogger(LOGGER_NAME)
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+    handler = Collector()
+    handler.setFormatter(ConsoleFormatter(use_colors=False))
+    logger.addHandler(handler)
+
+    engine = build_engine_from_scenario("C")
+    engine.request(0, [0, 1, 0])
+    engine.request(1, [0, 0, 1])
+    engine.request(2, [1, 0, 0])
+    engine.check_deadlock()
+    engine.recover_from_deadlock()
+
+    logger.removeHandler(handler)
+    return ["-" * 78 if set(line) == {"-"} else line for line in lines]
+
+
+def add_code_block(doc, lines, font_size=7.5):
+    """Bloco com fundo escuro e fonte monoespaçada, imitando um terminal."""
+    for line in lines:
+        p = doc.add_paragraph()
+        p.paragraph_format.space_before = Pt(0)
+        p.paragraph_format.space_after = Pt(0)
+        shd = OxmlElement("w:shd")
+        shd.set(qn("w:val"), "clear")
+        shd.set(qn("w:color"), "auto")
+        shd.set(qn("w:fill"), "1E1E1E")
+        p._p.get_or_add_pPr().append(shd)
+        run = p.add_run(line or " ")
+        run.font.name = "Consolas"
+        run.font.size = Pt(font_size)
+        color = "D4D4D4"
+        for category, hex_color in TERMINAL_COLORS.items():
+            if line.startswith("[") and f"] {category} " in line:
+                color = hex_color
+                break
+        run.font.color.rgb = RGBColor.from_string(color)
+    doc.add_paragraph()
 
 
 def set_cell_shading(cell, color_hex):
@@ -104,7 +167,7 @@ def add_title_page(doc):
 
     for label in ["Aluno(a): ______________________________________",
                   "Disciplina: ______________________________________",
-                  "Data: 28 de agosto de 2026"]:
+                  "Data: ______ / ______ / ____________"]:
         p = doc.add_paragraph()
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         p.add_run(label).font.color.rgb = GRAY
@@ -138,6 +201,16 @@ def add_bullets(doc, items, numbered=False):
     style = "List Number" if numbered else "List Bullet"
     for item in items:
         doc.add_paragraph(item, style=style)
+
+
+def add_steps(doc, items):
+    """Lista numerada que sempre recomeça em 1 (o estilo "List Number" do
+    Word continua a contagem da lista anterior)."""
+    for n, item in enumerate(items, start=1):
+        p = doc.add_paragraph(f"{n}. {item}")
+        p.paragraph_format.left_indent = Cm(1.0)
+        p.paragraph_format.first_line_indent = Cm(-0.5)
+        p.paragraph_format.space_after = Pt(2)
 
 
 def add_image(doc, filename, caption, width_cm=15):
@@ -299,13 +372,29 @@ add_table(doc, ["Aba", "O que faz"], [
     ["Cenários prontos", "Três cenários pré-configurados para carregar com um clique (A, B e C)."],
     ["Ajuda", "A analogia do corredor e a explicação das condições de deadlock."],
 ], col_widths_cm=[4, 12])
+add_para(
+    doc,
+    "Além da janela, o próprio terminal onde o programa foi aberto funciona "
+    "como terminal de log: cada passo do algoritmo é impresso ali, em tempo "
+    "real e com cores por categoria (ver seções 4.3 e 5.3)."
+)
 
 add_heading(doc, "Como executar", level=2)
-add_para(doc, "Dentro da pasta do projeto, com Python 3.10+ instalado:")
+add_para(
+    doc,
+    "Abra um terminal (Prompt de Comando, PowerShell ou o terminal do "
+    "PyCharm/VS Code) dentro da pasta do projeto, com Python 3.10+ instalado, e rode:"
+)
 p = doc.add_paragraph()
 run = p.add_run("python main.py")
 run.font.name = "Consolas"
 run.font.size = Pt(11)
+add_para(
+    doc,
+    "A janela do simulador abre e o terminal passa a mostrar o log. Deixe os "
+    "dois lado a lado durante a apresentação. Uma cópia do log também é "
+    "gravada em logs/simulacao.log (recriado a cada execução)."
+)
 add_para(
     doc,
     "É necessário ter as bibliotecas matplotlib e networkx instaladas "
@@ -343,7 +432,8 @@ add_bullets(doc, [
 add_para(
     doc,
     "As cores dos processos também têm significado: verde é pronto/executando, "
-    "amarelo é bloqueado (esperando um recurso) e cinza é terminado."
+    "amarelo é bloqueado (esperando um recurso), cinza é terminado e "
+    "vermelho é abortado (vítima escolhida para quebrar um deadlock)."
 )
 add_image(doc, "05_simulacao_manual_pedido.png", "Depois de um pedido concedido: a Allocation do processo escolhido aumentou e o Available diminuiu.")
 add_para(
@@ -354,16 +444,29 @@ add_para(
     "o Cenário C, explicado adiante."
 )
 
-add_heading(doc, "4.3 Aba Log / Histórico -- o raciocínio do algoritmo", level=2)
+add_heading(doc, "4.3 O log do algoritmo -- aba Log / Histórico e terminal de log", level=2)
 add_para(
     doc,
-    "Toda vez que algo acontece (um pedido, uma negação, uma detecção de "
-    "deadlock), o programa registra cada etapa do raciocínio nessa aba: "
+    "Toda vez que algo acontece (um pedido, uma negação, uma detecção ou um "
+    "tratamento de deadlock), o programa registra cada etapa do raciocínio: "
     "quais comparações Need <= Work foram feitas, se cada processo pôde "
-    "prosseguir, e a conclusão final. Do lado direito fica a linha do "
-    "tempo (timeline), com um resumo de cada evento -- clicando em um "
-    "deles, é possível ver como as matrizes estavam naquele momento."
+    "prosseguir, e a conclusão final. Esse mesmo registro aparece em dois "
+    "lugares:"
 )
+add_bullets(doc, [
+    "Na aba Log / Histórico, em forma de tabela, com filtro por categoria. Do lado direito fica a linha do tempo (timeline): clicando em um evento, é possível ver como as matrizes estavam naquele momento.",
+    "No terminal onde o programa foi aberto (terminal de log), linha por linha e em tempo real, no formato [passo] CATEGORIA | mensagem, com uma cor por categoria e uma linha separadora a cada nova requisição. Um exemplo real está na seção 5.3.",
+])
+add_table(doc, ["Categoria", "Significado"], [
+    ["REQUEST", "Um processo pediu recursos."],
+    ["SAFETY_CHECK", "Safety Algorithm testando Need[i] <= Work para um processo."],
+    ["RELEASE", "Processo terminaria (na simulação) e devolveria seus recursos ao Work."],
+    ["RESULT", "Conclusão de uma verificação: estado seguro/inseguro, deadlock ou não."],
+    ["GRANT / DENY", "Requisição concedida / não atendida no momento."],
+    ["ROLLBACK", "Alocação tentativa desfeita porque levaria a estado inseguro (prevenção)."],
+    ["DEADLOCK_CHECK", "Algoritmo de detecção testando o pedido pendente de um processo."],
+    ["RECOVERY / ABORT", "Tratamento do deadlock: escolha da vítima e aborto do processo."],
+], col_widths_cm=[4, 12])
 
 add_heading(doc, "4.4 Aba Cenários prontos", level=2)
 add_para(
@@ -382,8 +485,8 @@ add_heading(doc, "5. Demonstração Guiada dos Três Cenários")
 add_para(
     doc,
     "Esta é a parte mais importante para a apresentação: os três cenários "
-    "prontos mostram, na prática, um estado seguro, uma negação e um "
-    "deadlock real."
+    "prontos mostram, na prática, um estado seguro, uma negação (prevenção) "
+    "e um deadlock real sendo forçado, detectado e tratado."
 )
 
 add_heading(doc, "5.1 Cenário A -- Estado seguro (exemplo clássico)", level=2)
@@ -428,28 +531,80 @@ add_para(
     "requisições ficam pendentes e fecham um ciclo:"
 )
 add_image(doc, "11_cenario_c_ciclo.png", "As três requisições fecham um ciclo -- destacado em vermelho no grafo -- e o título já avisa \"CICLO DETECTADO\".")
-add_para(doc, "Clicando em \"Verificar Deadlock\", o algoritmo de detecção confirma formalmente o travamento:")
-add_image(doc, "12_cenario_c_log.png", "Log de detecção: cada processo é testado contra o que está pendente, e nenhum consegue progredir -- \"DEADLOCK detectado\".")
+
+add_heading(doc, "Detecção", level=3)
 add_para(
     doc,
-    "O que dizer na apresentação: esse é o contraste-chave do trabalho -- "
-    "se esse mesmo cenário rodasse em modo Protegido, a segunda ou terceira "
-    "requisição já teria sido negada antes de o ciclo se fechar, exatamente "
-    "como no Cenário B."
+    "Clicando em \"Verificar Deadlock (detecção)\" (role o painel da "
+    "direita até o fim para ver os botões), o algoritmo de detecção "
+    "(core/detection.py) confirma formalmente o travamento. Ele parte do que "
+    "está livre (Work = Available = [0, 0, 0]) e testa, para cada processo, "
+    "se o pedido pendente cabe em Work. Nenhum cabe, então nenhum processo "
+    "pode ser atendido, terminar e liberar o que segura: os três ficam com "
+    "Finish = False -- DEADLOCK detectado em P0, P1 e P2."
+)
+
+add_heading(doc, "Tratamento", level=3)
+add_para(
+    doc,
+    "Clicando em \"Recuperar do Deadlock (abortar vítima)\", o simulador "
+    "trata a situação por recuperação por término de processo "
+    "(recover_from_deadlock, em simulation/engine.py):"
+)
+add_steps(doc, [
+    "Detecta de novo quais processos estão em deadlock.",
+    "Escolhe uma vítima: o processo em deadlock que retém MENOS recursos (menor custo para abortar). Como os três retêm 1 recurso cada, o desempate é pelo menor índice: P0.",
+    "Aborta P0: o recurso R0 que ele segurava volta para Available.",
+    "Reavalia os processos bloqueados: P2 esperava justamente R0, então recebe o recurso e volta a executar.",
+    "Detecta de novo: agora P2 pode terminar e liberar R2, que é o que P1 espera -- não há mais ciclo. Se ainda houvesse deadlock, o processo se repetiria com uma nova vítima.",
+])
+add_image(doc, "14_cenario_c_recuperado.png", "Depois do tratamento: P0 abortado (vermelho, sem recursos), P2 executando com R0 e R2, P1 apenas esperando R2 -- o ciclo foi quebrado.")
+add_image(doc, "12_cenario_c_log.png", "Aba Log após o tratamento: detecção, escolha da vítima, aborto, repasse do recurso e a nova verificação concluindo \"Nenhum deadlock detectado\".")
+
+add_heading(doc, "O mesmo raciocínio no terminal de log", level=3)
+add_para(
+    doc,
+    "Esta é a saída real do terminal para o Cenário C inteiro -- forçar o "
+    "deadlock, detectar e tratar (gerada executando o próprio simulador):"
+)
+add_code_block(doc, capture_terminal_log_of_scenario_c())
+
+add_para(
+    doc,
+    "O que dizer na apresentação: aqui aparecem as três estratégias contra "
+    "deadlock. Em modo Protegido o Banqueiro PREVINE -- a segunda ou "
+    "terceira requisição teria sido negada antes de o ciclo se fechar, como "
+    "no Cenário B. Em modo Livre o deadlock acontece, o algoritmo de "
+    "detecção o IDENTIFICA (ninguém consegue ser atendido) e a recuperação o "
+    "TRATA abortando o processo mais barato e repassando seus recursos."
 )
 
 # 6. Roteiro -------------------------------------------------------------------
 doc.add_page_break()
 add_heading(doc, "6. Roteiro Sugerido para a Apresentação")
-add_para(doc, "Um roteiro de aproximadamente 8 a 10 minutos, usando só a aba Cenários prontos e a de Log:")
+add_para(
+    doc,
+    "O trabalho será avaliado em dois pontos: (1) os logs e o código -- "
+    "código bem documentado e um terminal de log mostrando o algoritmo passo "
+    "a passo; e (2) a apresentação -- rodar o simulador, forçar um deadlock e "
+    "explicar como o código o detectou e tratou. O roteiro abaixo (cerca de "
+    "10 a 12 minutos) cobre os dois."
+)
+add_para(
+    doc,
+    "Antes de começar: abra um terminal na pasta do projeto, rode python "
+    "main.py e deixe o terminal visível ao lado da janela do simulador.",
+    bold=True,
+)
 add_table(doc, ["Tempo", "O que fazer", "O que falar"], [
     ["~1 min", "Abrir na aba Ajuda", "Contar a analogia do corredor e citar as 4 condições de deadlock."],
     ["~2 min", "Carregar Cenário A", "Explicar Allocation/Max/Need/Available e por que esse estado é seguro."],
-    ["~2 min", "Carregar Cenário B e fazer o pedido de P1", "Mostrar a negação no grafo e depois o raciocínio linha a linha no Log."],
-    ["~3 min", "Carregar Cenário C, fazer os 3 pedidos e clicar em Verificar Deadlock", "Mostrar o ciclo em vermelho e a confirmação no Log; comparar com o que aconteceria em modo Protegido."],
-    ["~1 min", "Encerramento", "Resumir: o Banqueiro nunca deixa o sistema chegar a um deadlock, recusando qualquer pedido que levaria a um estado inseguro."],
+    ["~2 min", "Carregar Cenário B e fazer o pedido de P1 (1, 0)", "Mostrar a negação no grafo e o raciocínio linha a linha no terminal de log: PREVENÇÃO pelo Banqueiro (rollback)."],
+    ["~3 min", "Carregar Cenário C, fazer os 3 pedidos, clicar em Verificar Deadlock e depois em Recuperar do Deadlock", "Forçar o deadlock (ciclo em vermelho), mostrar a DETECÇÃO no terminal (ninguém cabe em Work) e o TRATAMENTO (vítima P0 abortada, R0 repassado a P2, ciclo quebrado)."],
+    ["~2 min", "Mostrar o código (seção 8)", "Abrir core/banker.py, core/detection.py e recover_from_deadlock em simulation/engine.py; apontar os comentários Passo 1, Passo 2... que seguem o livro-texto."],
+    ["~1 min", "Encerramento", "Resumir: em modo Protegido o Banqueiro nunca deixa o deadlock acontecer; sem proteção, o sistema detecta e se recupera dele."],
 ], col_widths_cm=[2.2, 6.3, 7.5])
-add_para(doc, "Dica: pratique a sequência de cliques antes da apresentação (Cenários prontos -> Simulação -> Log) para não perder tempo procurando os botões na hora.")
+add_para(doc, "Dica: pratique a sequência de cliques antes da apresentação (Cenários prontos -> Simulação -> Log) para não perder tempo procurando os botões na hora. Os botões de detecção e recuperação só aparecem no modo Livre, no fim do painel da direita (role para baixo).")
 
 # 7. Perguntas frequentes -------------------------------------------------------
 doc.add_page_break()
@@ -463,6 +618,15 @@ add_qa(doc,
 add_qa(doc,
     "Como o simulador consegue mostrar um deadlock de verdade, se o Banqueiro sempre previne?",
     "Existe um modo \"Livre\", usado no Cenário C, que desliga a verificação de segurança de propósito, só para fins didáticos -- assim é possível ver a espera circular se formando e sendo confirmada por um algoritmo de detecção separado.")
+add_qa(doc,
+    "Depois de detectar o deadlock, como o código trata a situação?",
+    "Por recuperação por término de processo: escolhe uma vítima entre os processos em deadlock, aborta-a (os recursos dela voltam para Available), repassa esses recursos a quem estava bloqueado esperando por eles e roda a detecção de novo. Se ainda houver deadlock, escolhe outra vítima; se não, o tratamento termina.")
+add_qa(doc,
+    "Por que a vítima foi o P0?",
+    "O critério é abortar o processo que retém menos recursos, ou seja, o de menor custo. No Cenário C os três retêm 1 recurso cada, então o desempate é pelo menor índice. Abortar um só já basta, porque isso quebra o ciclo.")
+add_qa(doc,
+    "Abortar um processo não é perder trabalho?",
+    "Sim, por isso a recuperação é o último recurso e o critério tenta minimizar a perda. É justamente a vantagem do Banqueiro: em modo Protegido o deadlock nunca chega a acontecer, então ninguém precisa ser abortado.")
 add_qa(doc,
     "O que acontece quando uma requisição é negada -- os recursos ficam perdidos?",
     "Não. O simulador testa a alocação, e se o resultado for inseguro, desfaz exatamente essa tentativa (rollback) -- as matrizes voltam a ser idênticas ao estado anterior ao pedido.")
@@ -481,16 +645,34 @@ add_bullets(doc, [
     "Linguagem: Python 3, interface gráfica com Tkinter.",
     "Grafo de alocação: matplotlib + networkx, embutido na janela.",
     "core/ -- lógica pura do algoritmo (Safety Algorithm, Resource-Request Algorithm, detecção de deadlock), sem nenhuma dependência de interface gráfica.",
-    "simulation/ -- motor de simulação: modos Protegido e Livre, histórico de eventos e snapshots.",
+    "simulation/ -- motor de simulação: modos Protegido e Livre, tratamento (recuperação) de deadlock, histórico de eventos e o terminal de log.",
     "scenarios/ -- definição dos três cenários prontos (A, B e C).",
     "gui/ -- as cinco abas da interface.",
-    "tests/ -- 33 testes automatizados cobrindo o algoritmo (incluindo o caso clássico do livro-texto e o teste de rollback exato).",
+    "tests/ -- 40 testes automatizados cobrindo o algoritmo (incluindo o caso clássico do livro-texto, o teste de rollback exato e a recuperação do Cenário C).",
 ])
+add_para(doc, "Para rodar toda a suíte de testes e ver cada verificação passando:")
 p = doc.add_paragraph()
 run = p.add_run("python -m unittest discover -s tests -v")
 run.font.name = "Consolas"
 run.font.size = Pt(11)
-add_para(doc, "roda toda a suíte de testes e mostra cada verificação passando.")
+
+add_heading(doc, "Mapa do código: onde está cada parte", level=2)
+add_para(doc, "Use esta tabela para abrir o arquivo certo quando perguntarem \"onde no código isso acontece?\":")
+add_table(doc, ["O que", "Onde no código"], [
+    ["Prevenção (Algoritmo do Banqueiro)", "core/banker.py -- request_algorithm() (Passos 1 a 5b) e safety_algorithm() (Passos 1 a 4)"],
+    ["Rollback de uma requisição insegura", "core/banker.py -- Passo 5b (state.restore) e core/state.py -- clone() / restore()"],
+    ["Detecção de deadlock", "core/detection.py -- detect_deadlock() (Passos 1 a 4); chamado por check_deadlock() em simulation/engine.py"],
+    ["Tratamento (recuperação)", "simulation/engine.py -- recover_from_deadlock(), _choose_victim(), _abort_process() e _retry_pending()"],
+    ["Modo Livre (forçar deadlock)", "simulation/engine.py -- _request_free()"],
+    ["Terminal de log", "simulation/terminal_log.py (formato e cores) e core/state.py -- _append(), que envia cada passo ao logger"],
+    ["Grafo e destaque do ciclo", "gui/graph_view.py -- draw_rag() e _find_cycle_edges()"],
+], col_widths_cm=[5, 11])
+add_para(
+    doc,
+    "Todos os módulos têm um texto de abertura (docstring) explicando seu "
+    "papel, e os algoritmos têm comentários Passo 1, Passo 2... que "
+    "seguem a numeração do livro-texto (Silberschatz)."
+)
 
 # 9. Conclusão ------------------------------------------------------------------
 doc.add_page_break()
@@ -501,14 +683,16 @@ add_para(
     "simular múltiplos processos disputando recursos, implementar o "
     "Algoritmo do Banqueiro completo (incluindo o Safety Algorithm), "
     "visualizar o grafo de alocação, representar as matrizes de estado, "
-    "demonstrar cenários que levam a deadlock e como são prevenidos, e "
-    "registrar em log o raciocínio de cada decisão."
+    "demonstrar cenários que levam a deadlock e como são prevenidos, "
+    "detectar e tratar um deadlock real, e registrar no terminal de log o "
+    "raciocínio de cada decisão."
 )
 add_para(
     doc,
     "Para a apresentação, o caminho mais direto é: Ajuda -> Cenário A -> "
-    "Cenário B (com o pedido negado) -> Cenário C (com o deadlock real) -> "
-    "Log. Esse percurso, sozinho, já conta toda a história do algoritmo."
+    "Cenário B (prevenção: pedido negado) -> Cenário C (deadlock forçado, "
+    "detectado e tratado) -> código. Esse percurso, acompanhado do terminal "
+    "de log, já conta toda a história do algoritmo."
 )
 
 doc.save(OUT_PATH)

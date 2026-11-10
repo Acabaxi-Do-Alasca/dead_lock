@@ -72,9 +72,11 @@ SCENARIO_C_DEADLOCK = {
         "carrega em modo LIVRE (sem verificação de segurança): peça, na aba "
         "Simulação, P0->(0,1,0), P1->(0,0,1) e P2->(1,0,0), nessa ordem. As três "
         "requisições ficam pendentes e fecham um ciclo P0->R1->P1->R2->P2->R0->P0. "
-        "A detecção de deadlock confirma que os 3 processos ficam travados. "
-        "Compare com o modo Protegido: lá, a segunda ou terceira requisição já "
-        "seria negada antes de o ciclo se fechar."
+        "\"Verificar Deadlock\" confirma que os 3 processos ficam travados "
+        "(detecção). Depois, \"Recuperar do Deadlock\" trata a situação: escolhe "
+        "um processo-vítima, aborta-o e repassa os recursos liberados a quem "
+        "esperava, quebrando o ciclo. Compare com o modo Protegido: lá, a "
+        "segunda ou terceira requisição já seria negada antes de o ciclo se fechar."
     ),
     "processes": ["P0", "P1", "P2"],
     "resources": [("R0", 1), ("R1", 1), ("R2", 1)],

@@ -16,6 +16,7 @@ STATE_COLORS = {
     ProcessState.RUNNING: "#4CAF50",
     ProcessState.BLOCKED: "#FFC107",
     ProcessState.FINISHED: "#BDBDBD",
+    ProcessState.ABORTED: "#E57373",
 }
 
 RESOURCE_COLOR = "#90CAF9"

@@ -4,11 +4,20 @@
 eventos produzido ao longo da simulação. `clone()`/`restore()` implementam o
 rollback usado pelo Resource-Request Algorithm quando uma requisição levaria a
 um estado inseguro.
+
+Cada entrada de log, além de ficar guardada em `event_log` (exibido na aba
+Log da interface), também é enviada ao logger "banqueiro" do módulo padrão
+`logging`. O `main.py` liga esse logger ao terminal e a um arquivo, de modo
+que o raciocínio do algoritmo aparece passo a passo no console enquanto a
+simulação roda (ver `simulation/terminal_log.py`).
 """
 
 import copy
+import logging
 
 from core.models import LogEntry, Process, ResourceType
+
+logger = logging.getLogger("banqueiro")
 
 
 class SystemState:
@@ -69,14 +78,19 @@ class SystemState:
 
     def log(self, category: str, message: str, data: dict | None = None) -> LogEntry:
         entry = LogEntry(self.next_step(), category, message, data or {})
-        self.event_log.append(entry)
+        self._append(entry)
         return entry
 
     def log_many(self, entries: list[LogEntry]) -> None:
         """Reindexa e anexa uma lista de LogEntry (ex: vinda do safety_algorithm)."""
         for entry in entries:
             entry.step = self.next_step()
-            self.event_log.append(entry)
+            self._append(entry)
+
+    def _append(self, entry: LogEntry) -> None:
+        """Guarda a entrada (para a GUI) e a espelha no terminal de log."""
+        self.event_log.append(entry)
+        logger.info(entry.message, extra={"step": entry.step, "category": entry.category})
 
     # -- clone / restore (rollback) -----------------------------------------
 

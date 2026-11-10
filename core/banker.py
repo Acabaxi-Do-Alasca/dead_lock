@@ -2,6 +2,17 @@
 
 Referência clássica: Silberschatz, Galvin & Gagne, "Operating System
 Concepts", capítulo de Deadlocks.
+
+Estruturas usadas (n processos, m tipos de recurso):
+  Available[m]     -- instâncias livres de cada recurso
+  Max[n][m]        -- demanda máxima declarada por cada processo
+  Allocation[n][m] -- o que cada processo já tem
+  Need[n][m]       -- o que ainda pode pedir (Need = Max - Allocation)
+
+Ideia central: o sistema só concede uma requisição se, depois dela, ainda
+existir uma ordem (sequência segura) em que TODOS os processos conseguem
+obter o que falta, terminar e devolver seus recursos. Assim a espera
+circular nunca chega a se formar -- o deadlock é PREVENIDO.
 """
 
 from dataclasses import dataclass, field
@@ -31,6 +42,8 @@ def safety_algorithm(available, allocation, need, n_proc, n_res) -> SafetyResult
     Retorna se o estado é seguro, a sequência segura encontrada (se houver) e
     um log passo a passo explicando cada comparação Need[i] <= Work.
     """
+    # Passo 1: Work = Available (cópia, para simular sem alterar o estado real)
+    #          e Finish[i] = False para todo processo.
     work = list(available)
     finish = [False] * n_proc
     safe_sequence: list[int] = []
@@ -46,6 +59,8 @@ def safety_algorithm(available, allocation, need, n_proc, n_res) -> SafetyResult
             if finish[i]:
                 continue
             step += 1
+            # Passo 2: procurar um processo i ainda não finalizado cujo Need[i]
+            #          caiba no que está livre (Need[i] <= Work, recurso a recurso).
             can_proceed = all(need[i][j] <= work[j] for j in range(n_res))
             log.append(
                 LogEntry(
@@ -57,6 +72,9 @@ def safety_algorithm(available, allocation, need, n_proc, n_res) -> SafetyResult
                 )
             )
             if can_proceed:
+                # Passo 3: se couber, o processo i consegue terminar e devolve
+                #          tudo o que tem: Work = Work + Allocation[i];
+                #          Finish[i] = True. Volta ao passo 2 com mais recurso livre.
                 work = [work[j] + allocation[i][j] for j in range(n_res)]
                 finish[i] = True
                 safe_sequence.append(i)
@@ -72,6 +90,9 @@ def safety_algorithm(available, allocation, need, n_proc, n_res) -> SafetyResult
                     )
                 )
 
+    # Passo 4: se Finish[i] == True para todo i, o estado é SEGURO (a ordem em
+    #          que os processos foram encaixados é a sequência segura). Se
+    #          sobrou alguém, ninguém garante que ele termine: estado INSEGURO.
     is_safe = all(finish)
     step += 1
     if is_safe:
@@ -112,6 +133,8 @@ def request_algorithm(state: SystemState, pid: int, request: list[int]) -> Reque
 
     log: list[LogEntry] = [LogEntry(0, "REQUEST", f"P{i} solicita Request={request}")]
 
+    # Passo 1: o pedido não pode passar do que o processo declarou precisar
+    #          (Request <= Need). Se passar, é erro do próprio processo.
     if not all(request[j] <= state.need[i][j] for j in range(n_res)):
         log.append(
             LogEntry(
@@ -123,6 +146,8 @@ def request_algorithm(state: SystemState, pid: int, request: list[int]) -> Reque
         )
         return RequestResult(False, "EXCEEDS_MAX", log)
 
+    # Passo 2: precisa haver recurso livre agora (Request <= Available).
+    #          Se não houver, o processo simplesmente espera (fica bloqueado).
     if not all(request[j] <= state.available[j] for j in range(n_res)):
         log.append(
             LogEntry(
@@ -135,6 +160,9 @@ def request_algorithm(state: SystemState, pid: int, request: list[int]) -> Reque
         state.processes[i].state = ProcessState.BLOCKED
         return RequestResult(False, "INSUFFICIENT_RESOURCES", log)
 
+    # Passo 3: "finge" que concede -- guarda uma cópia do estado (para poder
+    #          desfazer) e aplica a alocação tentativa:
+    #          Available -= Request; Allocation[i] += Request; Need[i] -= Request.
     saved = state.clone()
     for j in range(n_res):
         state.available[j] -= request[j]
@@ -150,9 +178,11 @@ def request_algorithm(state: SystemState, pid: int, request: list[int]) -> Reque
         )
     )
 
+    # Passo 4: roda o Safety Algorithm sobre esse estado hipotético.
     safety = safety_algorithm(state.available, state.allocation, state.need, n_proc, n_res)
     log.extend(safety.log)
 
+    # Passo 5a: estado seguro -> a alocação tentativa vira definitiva.
     if safety.is_safe:
         log.append(
             LogEntry(
@@ -163,6 +193,8 @@ def request_algorithm(state: SystemState, pid: int, request: list[int]) -> Reque
         )
         return RequestResult(True, None, log, safety)
 
+    # Passo 5b: estado inseguro -> desfaz tudo (rollback para a cópia salva) e
+    #           o processo espera. É aqui que o deadlock é PREVENIDO.
     state.restore(saved)
     state.processes[i].state = ProcessState.BLOCKED
     log.append(

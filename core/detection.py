@@ -19,6 +19,15 @@ class DetectionResult:
 
 
 def detect_deadlock(available, allocation, outstanding_request, n_proc, n_res) -> DetectionResult:
+    """Retorna a lista de processos em deadlock (vazia se não houver nenhum).
+
+    Pergunta que o algoritmo responde: "considerando o que cada processo está
+    esperando AGORA, existe alguma ordem em que todos conseguem ser atendidos?"
+    Quem sobrar no final está preso numa espera circular.
+    """
+    # Passo 1: Work = Available. Processos que não retêm nada já começam como
+    #          Finish = True: não seguram recurso de ninguém, logo não podem
+    #          fazer parte de um ciclo de espera.
     work = list(available)
     finish = [all(allocation[i][j] == 0 for j in range(n_res)) for i in range(n_proc)]
     log: list[LogEntry] = [
@@ -33,6 +42,7 @@ def detect_deadlock(available, allocation, outstanding_request, n_proc, n_res) -
             if finish[i]:
                 continue
             step += 1
+            # Passo 2: o pedido pendente de i cabe no que está livre?
             can_proceed = all(outstanding_request[i][j] <= work[j] for j in range(n_res))
             log.append(
                 LogEntry(
@@ -44,6 +54,8 @@ def detect_deadlock(available, allocation, outstanding_request, n_proc, n_res) -
                 )
             )
             if can_proceed:
+                # Passo 3: se cabe, i pode ser atendido, terminar e devolver o
+                #          que tem -- isso pode destravar outros processos.
                 work = [work[j] + allocation[i][j] for j in range(n_res)]
                 finish[i] = True
                 changed = True
@@ -57,6 +69,7 @@ def detect_deadlock(available, allocation, outstanding_request, n_proc, n_res) -
                     )
                 )
 
+    # Passo 4: quem ficou com Finish = False nunca será atendido -> DEADLOCK.
     deadlocked = [i for i in range(n_proc) if not finish[i]]
     step += 1
     if deadlocked:
