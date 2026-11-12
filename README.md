@@ -14,12 +14,14 @@ O simulador cobre as três estratégias contra deadlock:
 - **Tratamento**: a recuperação escolhe um processo-vítima, o aborta e repassa
   os recursos liberados a quem esperava, quebrando o ciclo.
 
-## Requisitos
+## Instalação rápida
 
-- Python 3.10+
-- `matplotlib` e `networkx` (verifique com `pip show matplotlib networkx`;
-  se faltar, instale com `pip install matplotlib networkx`)
-- `tkinter` (já vem com a instalação padrão do Python no Windows)
+Requer Python 3.10 ou superior. O passo a passo completo, com solução de
+problemas, está em [INSTALACAO.md](INSTALACAO.md).
+
+```bash
+python -m pip install -r requirements.txt
+```
 
 ## Como executar
 
@@ -78,5 +80,19 @@ simulation/   motor de simulação (modos, recuperação, histórico, terminal d
 scenarios/    definição e carregamento dos 3 cenários prontos
 gui/          interface Tkinter
 tests/        suíte de testes unitários
-docs/         script e imagens do manual (Manual_Simulador_Banqueiro.docx)
+docs/         geradores dos documentos (.docx/.pdf) e imagens
+```
+
+## Gerar os documentos de novo
+
+Os documentos são gerados por scripts que executam a suíte de testes e os
+cenários no momento da geração, de modo que a evidência de testes é sempre
+atual. Exigem `python-docx` (`pip install python-docx`); o PDF é exportado
+automaticamente se o Microsoft Word estiver instalado. Os arquivos gerados
+ficam na pasta local `entrega/`, que não é versionada.
+
+```bash
+python docs/build_documentacao.py
+python docs/build_instalacao.py
+python docs/build_manual.py
 ```

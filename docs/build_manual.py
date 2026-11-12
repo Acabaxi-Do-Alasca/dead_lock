@@ -1,266 +1,36 @@
-"""Gera o manual de uso / guia de apresentação em .docx.
+"""Gera o Guia de Apresentação (manual de uso + roteiro de fala) em .docx/.pdf.
+
+Material de apoio do grupo para a apresentação -- não é a documentação formal
+de entrega (essa é gerada por build_documentacao.py).
 
 Uso: python docs/build_manual.py
-Gera: Manual_Simulador_Banqueiro.docx na raiz do projeto.
+Gera: Manual_Simulador_Banqueiro.docx e .pdf na raiz do projeto.
 """
 
-import logging
 import os
 import sys
 
-from docx import Document
-from docx.enum.table import WD_TABLE_ALIGNMENT
-from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.oxml import OxmlElement
-from docx.oxml.ns import qn
-from docx.shared import Cm, Mm, Pt, RGBColor
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_DIR = os.path.dirname(BASE_DIR)
-IMG_DIR = os.path.join(BASE_DIR, "imagens")
+from docx.shared import Pt  # noqa: E402
+
+from docx_helpers import (  # noqa: E402
+    CAPA_CAMPOS, PROJECT_DIR, add_bullets, add_code_block, add_heading, add_image, add_para, add_qa,
+    add_steps, add_summary, add_table, add_title_page, capture_terminal_log_of_scenario_c,
+    new_doc, save_with_pdf,
+)
+
 OUT_PATH = os.path.join(PROJECT_DIR, "Manual_Simulador_Banqueiro.docx")
 
-sys.path.insert(0, PROJECT_DIR)
-from scenarios.loader import build_engine_from_scenario  # noqa: E402
-from simulation.terminal_log import ConsoleFormatter, LOGGER_NAME  # noqa: E402
-
-ACCENT = RGBColor(0x1F, 0x4E, 0x5F)
-GRAY = RGBColor(0x55, 0x55, 0x55)
-
-# Cores do terminal de log (mesma ideia das cores ANSI de simulation/terminal_log.py)
-TERMINAL_COLORS = {
-    "REQUEST": "4FC1E9", "GRANT": "8CD17D", "DENY": "F2C14E", "ROLLBACK": "F2726F",
-    "RESULT": "D59BF6", "RECOVERY": "F2726F", "ABORT": "F2726F", "RELEASE": "7FA7E8",
-}
-
-fig_counter = [0]
-
-
-def capture_terminal_log_of_scenario_c():
-    """Roda o Cenário C de verdade (forçar deadlock -> detectar -> tratar) e
-    devolve as linhas exatamente como saem no terminal de log."""
-    lines = []
-
-    class Collector(logging.Handler):
-        def emit(self, record):
-            lines.extend(self.format(record).split("\n"))
-
-    logger = logging.getLogger(LOGGER_NAME)
-    logger.setLevel(logging.INFO)
-    logger.propagate = False
-    handler = Collector()
-    handler.setFormatter(ConsoleFormatter(use_colors=False))
-    logger.addHandler(handler)
-
-    engine = build_engine_from_scenario("C")
-    engine.request(0, [0, 1, 0])
-    engine.request(1, [0, 0, 1])
-    engine.request(2, [1, 0, 0])
-    engine.check_deadlock()
-    engine.recover_from_deadlock()
-
-    logger.removeHandler(handler)
-    return ["-" * 78 if set(line) == {"-"} else line for line in lines]
-
-
-def add_code_block(doc, lines, font_size=7.5):
-    """Bloco com fundo escuro e fonte monoespaçada, imitando um terminal."""
-    for line in lines:
-        p = doc.add_paragraph()
-        p.paragraph_format.space_before = Pt(0)
-        p.paragraph_format.space_after = Pt(0)
-        shd = OxmlElement("w:shd")
-        shd.set(qn("w:val"), "clear")
-        shd.set(qn("w:color"), "auto")
-        shd.set(qn("w:fill"), "1E1E1E")
-        p._p.get_or_add_pPr().append(shd)
-        run = p.add_run(line or " ")
-        run.font.name = "Consolas"
-        run.font.size = Pt(font_size)
-        color = "D4D4D4"
-        for category, hex_color in TERMINAL_COLORS.items():
-            if line.startswith("[") and f"] {category} " in line:
-                color = hex_color
-                break
-        run.font.color.rgb = RGBColor.from_string(color)
-    doc.add_paragraph()
-
-
-def set_cell_shading(cell, color_hex):
-    tcPr = cell._tc.get_or_add_tcPr()
-    shd = OxmlElement("w:shd")
-    shd.set(qn("w:val"), "clear")
-    shd.set(qn("w:color"), "auto")
-    shd.set(qn("w:fill"), color_hex)
-    tcPr.append(shd)
-
-
-def add_page_number_field(paragraph):
-    run = paragraph.add_run()
-    fld_begin = OxmlElement("w:fldChar")
-    fld_begin.set(qn("w:fldCharType"), "begin")
-    instr = OxmlElement("w:instrText")
-    instr.set(qn("xml:space"), "preserve")
-    instr.text = "PAGE"
-    fld_end = OxmlElement("w:fldChar")
-    fld_end.set(qn("w:fldCharType"), "end")
-    run._r.append(fld_begin)
-    run._r.append(instr)
-    run._r.append(fld_end)
-
-
-def new_doc():
-    doc = Document()
-
-    section = doc.sections[0]
-    section.page_width = Mm(210)
-    section.page_height = Mm(297)
-    section.left_margin = Cm(2.5)
-    section.right_margin = Cm(2.5)
-    section.top_margin = Cm(2)
-    section.bottom_margin = Cm(2)
-
-    normal = doc.styles["Normal"]
-    normal.font.name = "Calibri"
-    normal.font.size = Pt(11)
-
-    for level, size in ((1, 18), (2, 14), (3, 12)):
-        style = doc.styles[f"Heading {level}"]
-        style.font.color.rgb = ACCENT
-        style.font.size = Pt(size)
-
-    footer_para = section.footer.paragraphs[0]
-    footer_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    add_page_number_field(footer_para)
-
-    return doc
-
-
-def add_title_page(doc):
-    doc.add_paragraph()
-    doc.add_paragraph()
-    title = doc.add_paragraph()
-    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = title.add_run("Simulador do Algoritmo do Banqueiro")
-    run.bold = True
-    run.font.size = Pt(28)
-    run.font.color.rgb = ACCENT
-
-    subtitle = doc.add_paragraph()
-    subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = subtitle.add_run("Manual de Uso e Guia de Apresentação")
-    run.font.size = Pt(16)
-    run.font.color.rgb = GRAY
-
-    doc.add_paragraph()
-    p = doc.add_paragraph()
-    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = p.add_run(
-        "Prevenção de deadlock por alocação de recursos: como o simulador funciona, "
-        "como operá-lo e um roteiro pronto para apresentar em sala."
-    )
-    run.italic = True
-    run.font.color.rgb = GRAY
-
-    for _ in range(6):
-        doc.add_paragraph()
-
-    for label in ["Aluno(a): ______________________________________",
-                  "Disciplina: ______________________________________",
-                  "Data: ______ / ______ / ____________"]:
-        p = doc.add_paragraph()
-        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        p.add_run(label).font.color.rgb = GRAY
-
-    doc.add_page_break()
-
-
-def add_summary(doc, items):
-    doc.add_heading("Sumário", level=1)
-    for item in items:
-        p = doc.add_paragraph(style="List Bullet")
-        p.add_run(item)
-    doc.add_page_break()
-
-
-def add_heading(doc, text, level=1):
-    doc.add_heading(text, level=level)
-
-
-def add_para(doc, text, italic=False, bold=False, size=None):
-    p = doc.add_paragraph()
-    run = p.add_run(text)
-    run.italic = italic
-    run.bold = bold
-    if size:
-        run.font.size = Pt(size)
-    return p
-
-
-def add_bullets(doc, items, numbered=False):
-    style = "List Number" if numbered else "List Bullet"
-    for item in items:
-        doc.add_paragraph(item, style=style)
-
-
-def add_steps(doc, items):
-    """Lista numerada que sempre recomeça em 1 (o estilo "List Number" do
-    Word continua a contagem da lista anterior)."""
-    for n, item in enumerate(items, start=1):
-        p = doc.add_paragraph(f"{n}. {item}")
-        p.paragraph_format.left_indent = Cm(1.0)
-        p.paragraph_format.first_line_indent = Cm(-0.5)
-        p.paragraph_format.space_after = Pt(2)
-
-
-def add_image(doc, filename, caption, width_cm=15):
-    fig_counter[0] += 1
-    doc.add_picture(os.path.join(IMG_DIR, filename), width=Cm(width_cm))
-    doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
-    cap = doc.add_paragraph()
-    cap.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = cap.add_run(f"Figura {fig_counter[0]} — {caption}")
-    run.italic = True
-    run.font.size = Pt(9.5)
-    run.font.color.rgb = GRAY
-
-
-def add_table(doc, header, rows, col_widths_cm=None):
-    table = doc.add_table(rows=1, cols=len(header))
-    table.style = "Table Grid"
-    table.alignment = WD_TABLE_ALIGNMENT.CENTER
-    hdr_cells = table.rows[0].cells
-    for i, text in enumerate(header):
-        hdr_cells[i].text = text
-        for p in hdr_cells[i].paragraphs:
-            for r in p.runs:
-                r.bold = True
-                r.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
-        set_cell_shading(hdr_cells[i], "1F4E5F")
-    for row in rows:
-        cells = table.add_row().cells
-        for i, text in enumerate(row):
-            cells[i].text = text
-    if col_widths_cm:
-        for row in table.rows:
-            for i, w in enumerate(col_widths_cm):
-                row.cells[i].width = Cm(w)
-    doc.add_paragraph()
-
-
-def add_qa(doc, question, answer):
-    p = doc.add_paragraph()
-    run = p.add_run("P: " + question)
-    run.bold = True
-    p2 = doc.add_paragraph()
-    p2.add_run("R: " + answer)
-    doc.add_paragraph()
-
-
-# --------------------------------------------------------------------------
-
 doc = new_doc()
-add_title_page(doc)
+add_title_page(
+    doc,
+    "Simulador do Algoritmo do Banqueiro",
+    "Manual de Uso e Guia de Apresentação",
+    "Prevenção de deadlock por alocação de recursos: como o simulador funciona, "
+    "como operá-lo e um roteiro pronto para apresentar em sala.",
+    CAPA_CAMPOS,
+)
 
 add_summary(doc, [
     "1. Introdução",
@@ -648,7 +418,7 @@ add_bullets(doc, [
     "simulation/ -- motor de simulação: modos Protegido e Livre, tratamento (recuperação) de deadlock, histórico de eventos e o terminal de log.",
     "scenarios/ -- definição dos três cenários prontos (A, B e C).",
     "gui/ -- as cinco abas da interface.",
-    "tests/ -- 40 testes automatizados cobrindo o algoritmo (incluindo o caso clássico do livro-texto, o teste de rollback exato e a recuperação do Cenário C).",
+    "tests/ -- 41 testes automatizados cobrindo o algoritmo (incluindo o caso clássico do livro-texto, o teste de rollback exato, a recuperação do Cenário C e a prova de que o Banqueiro impede esse ciclo).",
 ])
 add_para(doc, "Para rodar toda a suíte de testes e ver cada verificação passando:")
 p = doc.add_paragraph()
@@ -695,5 +465,4 @@ add_para(
     "de log, já conta toda a história do algoritmo."
 )
 
-doc.save(OUT_PATH)
-print("Documento salvo em:", OUT_PATH)
+save_with_pdf(doc, OUT_PATH)

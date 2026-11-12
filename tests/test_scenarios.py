@@ -1,9 +1,11 @@
 import unittest
 
 from core.banker import safety_algorithm
+from core.models import Process, ResourceType
+from core.state import SystemState
 from scenarios.loader import build_engine_from_scenario
-from scenarios.scenario_definitions import ALL_SCENARIOS
-from simulation.engine import Mode
+from scenarios.scenario_definitions import ALL_SCENARIOS, SCENARIOS_BY_KEY
+from simulation.engine import Mode, SimulationEngine
 
 
 class TestScenarios(unittest.TestCase):
@@ -52,6 +54,24 @@ class TestScenarios(unittest.TestCase):
 
         result = engine.check_deadlock()
         self.assertEqual(sorted(result.deadlocked_processes), [0, 1, 2])
+
+    def test_scenario_c_cycle_is_prevented_in_protected_mode(self):
+        # Mesmos processos/recursos/Max do Cenário C, mas partindo do zero e com
+        # o Banqueiro ligado: cada Pi tenta pegar seu Ri, como no cenário.
+        scenario = SCENARIOS_BY_KEY["C"]
+        processes = [Process(i, name) for i, name in enumerate(scenario["processes"])]
+        resources = [ResourceType(j, n, t) for j, (n, t) in enumerate(scenario["resources"])]
+        zero = [[0, 0, 0] for _ in processes]
+        engine = SimulationEngine(SystemState(processes, resources, zero, scenario["max_demand"]))
+
+        self.assertTrue(engine.request(pid=0, request_vector=[1, 0, 0]).granted)
+        self.assertTrue(engine.request(pid=1, request_vector=[0, 1, 0]).granted)
+        third = engine.request(pid=2, request_vector=[0, 0, 1])
+
+        # A terceira alocação fecharia o ciclo: o Banqueiro nega e desfaz
+        self.assertFalse(third.granted)
+        self.assertEqual(third.reason, "UNSAFE_STATE")
+        self.assertEqual(engine.state.allocation[2], [0, 0, 0])
 
 
 if __name__ == "__main__":
